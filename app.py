@@ -1,32 +1,32 @@
 import streamlit as st
+import os
 import re
 import io
 from datetime import date
 from docx import Document
 from docx.oxml.ns import qn
-
+ 
 # =============================================================================
 # PAGE CONFIG
 # =============================================================================
-
+ 
 st.set_page_config(
     page_title="Generador de Contratos",
-    page_icon="📄",
     layout="centered"
 )
-
+ 
 st.markdown("""
 <style>
     /* Clean, professional form styling */
     .main { background-color: #f7f8fc; }
     section[data-testid="stSidebar"] { display: none; }
-
+ 
     .block-container {
         max-width: 680px;
         padding-top: 2.5rem;
         padding-bottom: 3rem;
     }
-
+ 
     .header-box {
         background: linear-gradient(135deg, #1e3a5f 0%, #2d5f8a 100%);
         border-radius: 12px;
@@ -45,7 +45,7 @@ st.markdown("""
         font-size: 14px;
         opacity: 0.8;
     }
-
+ 
     .section-card {
         background: white;
         border-radius: 10px;
@@ -63,9 +63,9 @@ st.markdown("""
         padding-bottom: 10px;
         border-bottom: 2px solid #e8eaf0;
     }
-
+ 
     div[data-testid="stRadio"] > label { font-weight: 600; }
-
+ 
     .stTextInput > label, .stDateInput > label {
         font-size: 13px !important;
         font-weight: 600 !important;
@@ -80,7 +80,7 @@ st.markdown("""
         border-color: #2d5f8a !important;
         box-shadow: 0 0 0 3px rgba(45,95,138,0.12) !important;
     }
-
+ 
     div[data-testid="stRadio"] div[role="radiogroup"] {
         display: flex;
         gap: 12px;
@@ -100,7 +100,7 @@ st.markdown("""
         border-color: #2d5f8a;
         color: #1e3a5f;
     }
-
+ 
     .stButton > button {
         background: linear-gradient(135deg, #1e3a5f 0%, #2d5f8a 100%);
         color: white;
@@ -115,7 +115,7 @@ st.markdown("""
         margin-top: 8px;
     }
     .stButton > button:hover { opacity: 0.9; }
-
+ 
     .stDownloadButton > button {
         background: #16a34a !important;
         color: white !important;
@@ -126,7 +126,7 @@ st.markdown("""
         font-weight: 600 !important;
         width: 100% !important;
     }
-
+ 
     .info-note {
         background: #eff6ff;
         border-left: 4px solid #2d5f8a;
@@ -136,7 +136,7 @@ st.markdown("""
         color: #1e3a5f;
         margin-top: 12px;
     }
-
+ 
     .error-box {
         background: #fef2f2;
         border-left: 4px solid #dc2626;
@@ -146,7 +146,7 @@ st.markdown("""
         color: #dc2626;
         margin-top: 8px;
     }
-
+ 
     .success-box {
         background: #f0fdf4;
         border: 1px solid #86efac;
@@ -160,19 +160,19 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-
+ 
+ 
 # =============================================================================
 # CONTRACT LOGIC (identical to Colab version)
 # =============================================================================
-
+ 
 ORDINALS_ES = [
     'PRIMERA', 'SEGUNDA', 'TERCERA', 'CUARTA', 'QUINTA',
     'SEXTA', 'SÉPTIMA', 'OCTAVA', 'NOVENA', 'DÉCIMA',
     'UNDÉCIMA', 'DUODÉCIMA', 'DECIMOTERCERA', 'DECIMOCUARTA', 'DECIMOQUINTA',
     'DECIMOSEXTA', 'DECIMOSÉPTIMA', 'DECIMOCTAVA', 'DECIMONOVENA', 'VIGÉSIMA',
 ]
-
+ 
 def merge_runs_in_para(para):
     if len(para.runs) <= 1:
         return
@@ -180,11 +180,11 @@ def merge_runs_in_para(para):
     para.runs[0].text = full_text
     for run in para.runs[1:]:
         run.text = ''
-
+ 
 def get_paragraph_text(para):
     merge_runs_in_para(para)
     return para.runs[0].text.strip() if para.runs else ''
-
+ 
 def paragraph_is_clause_heading(text):
     upper = text.upper().strip()
     for pre in ['CLÁUSULAS ', 'CLAUSULAS ']:
@@ -195,7 +195,7 @@ def paragraph_is_clause_heading(text):
         if upper.startswith(word):
             return word
     return None
-
+ 
 def find_clause_block(doc, target_ordinal):
     paras = doc.paragraphs
     start = None
@@ -209,18 +209,18 @@ def find_clause_block(doc, target_ordinal):
     if start is not None:
         return start, len(paras) - 1
     return None, None
-
+ 
 def remove_paragraphs_by_index(doc, indices_to_remove):
     body = doc.element.body
     paras = doc.paragraphs
     elements_to_remove = [paras[i]._element for i in indices_to_remove if i < len(paras)]
     for el in elements_to_remove:
         body.remove(el)
-
+ 
 def is_antiguedad_heading(text):
     upper = text.upper().strip()
     return upper.startswith('SEGUNDA') and ('ANTIGÜ' in upper or 'ANTIGU' in upper)
-
+ 
 def is_numbered_clause(text):
     upper = text.upper().strip()
     check = upper
@@ -233,7 +233,7 @@ def is_numbered_clause(text):
             idx = upper.find(word)
             return word, idx
     return None, None
-
+ 
 def renumber_clauses(doc):
     for para in doc.paragraphs:
         merge_runs_in_para(para)
@@ -267,15 +267,15 @@ def renumber_clauses(doc):
                 text
             )
         para.runs[0].text = text
-
+ 
 def format_date_es(d):
     months = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
               'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
     return f"{d.day} de {months[d.month]} de {d.year}"
-
+ 
 def format_date_numeric(d):
     return f"{d.day:02d}/{d.month:02d}/{d.year}"
-
+ 
 def replace_placeholders(doc, replacements):
     def replace_in_para(para):
         merge_runs_in_para(para)
@@ -293,7 +293,7 @@ def replace_placeholders(doc, replacements):
             for cell in row.cells:
                 for para in cell.paragraphs:
                     replace_in_para(para)
-
+ 
 def remove_note_paragraphs(doc, phrases):
     body = doc.element.body
     to_remove = []
@@ -304,12 +304,12 @@ def remove_note_paragraphs(doc, phrases):
     for el in to_remove:
         body.remove(el)
     return len(to_remove)
-
+ 
 def generate_contract(template_bytes, ctype, name, id_num, nationality, address,
                       contract_date_val, seniority_service_date_val,
                       seniority_indemnity_date_val, external_start_date_val):
     doc = Document(io.BytesIO(template_bytes))
-
+ 
     if ctype == 'internal':
         start, end = find_clause_block(doc, 'CUARTA')
         if start is not None:
@@ -334,9 +334,9 @@ def generate_contract(template_bytes, ctype, name, id_num, nationality, address,
         else:
             if start is not None:
                 remove_paragraphs_by_index(doc, list(range(start, len(doc.paragraphs))))
-
+ 
     renumber_clauses(doc)
-
+ 
     if ctype == 'internal':
         in_puesto = False
         subpoint_counter = 0
@@ -364,16 +364,16 @@ def generate_contract(template_bytes, ctype, name, id_num, nationality, address,
                 para.runs[0].text = f'3.{subpoint_counter}  {current_text}'
             else:
                 para.add_run(f'3.{subpoint_counter}  ')
-
+ 
     c_date = format_date_es(contract_date_val)
     c_date_num = format_date_numeric(contract_date_val)
-
+ 
     for para in doc.paragraphs:
         merge_runs_in_para(para)
-
+ 
     start_date_str = (format_date_numeric(external_start_date_val) if ctype == 'external'
                       else format_date_numeric(seniority_service_date_val) if ctype == 'internal' else '')
-
+ 
     for para in doc.paragraphs:
         if not para.runs:
             continue
@@ -399,49 +399,42 @@ def generate_contract(template_bytes, ctype, name, id_num, nationality, address,
             text = text.replace('XXXXXX', start_date_str, 1)
             text = text.replace('XXX', start_date_str, 1)
         para.runs[0].text = text
-
+ 
     remove_note_paragraphs(doc, [
         'cambiar numeración si aplica',
         '(cambiar numeración si aplica)',
         '(cambiar numeración)',
         'cambiar numeración',
     ])
-
+ 
     for para in doc.paragraphs:
         merge_runs_in_para(para)
         if not para.runs:
             continue
         if '(si aplica)' in para.runs[0].text.lower():
             para.runs[0].text = re.sub(r'\s*\(si aplica\)', '', para.runs[0].text, flags=re.IGNORECASE).strip()
-
+ 
     output = io.BytesIO()
     doc.save(output)
     output.seek(0)
     return output.read()
-
-
+ 
+ 
 # =============================================================================
 # UI
 # =============================================================================
-
+ 
 st.markdown("""
 <div class="header-box">
-    <h1>📄 Generador de Contratos</h1>
+    <h1>Generador de Contratos</h1>
     <p>Sube la plantilla, rellena los datos y descarga el contrato listo.</p>
 </div>
 """, unsafe_allow_html=True)
-
-# --- Step 1: Upload template ---
-st.markdown('<div class="section-card"><div class="section-title">1 · Plantilla del contrato</div>', unsafe_allow_html=True)
-uploaded_file = st.file_uploader("Sube tu plantilla .docx", type=["docx"], label_visibility="collapsed")
-if uploaded_file:
-    st.success(f"✅ Plantilla cargada: **{uploaded_file.name}**")
-else:
-    st.markdown('<div class="info-note">📂 Sube el archivo .docx con los marcadores XXX antes de continuar.</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Step 2: Contract type ---
-st.markdown('<div class="section-card"><div class="section-title">2 · Tipo de contrato</div>', unsafe_allow_html=True)
+ 
+TEMPLATE_PATH = "VF- Contrato OW Offshore.docx"
+ 
+# --- Step 1: Contract type ---
+st.markdown('<div class="section-card"><div class="section-title">1 · Tipo de contrato</div>', unsafe_allow_html=True)
 contract_type = st.radio(
     "Selecciona el tipo:",
     options=["Transferencia interna", "Contratación externa"],
@@ -450,9 +443,9 @@ contract_type = st.radio(
 )
 is_internal = contract_type == "Transferencia interna"
 st.markdown('</div>', unsafe_allow_html=True)
-
+ 
 # --- Step 3: Employee details ---
-st.markdown('<div class="section-card"><div class="section-title">3 · Datos del empleado</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-card"><div class="section-title">2 · Datos del empleado</div>', unsafe_allow_html=True)
 col1, col2 = st.columns(2)
 with col1:
     employee_name = st.text_input("Nombre completo", placeholder="Ana García López")
@@ -464,11 +457,11 @@ with col3:
 with col4:
     employee_address = st.text_input("Domicilio", placeholder="Calle Mayor 10, 28001 Madrid")
 st.markdown('</div>', unsafe_allow_html=True)
-
+ 
 # --- Step 4: Dates ---
-st.markdown('<div class="section-card"><div class="section-title">4 · Fechas</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-card"><div class="section-title">3 · Fechas</div>', unsafe_allow_html=True)
 contract_date = st.date_input("Fecha del contrato", value=date.today())
-
+ 
 if is_internal:
     st.markdown("**Antigüedad** *(transferencia interna)*")
     col5, col6 = st.columns(2)
@@ -482,14 +475,14 @@ else:
     external_start_date = st.date_input("Fecha de inicio", value=date.today(), key="ext")
     seniority_service_date = None
     seniority_indemnity_date = None
-
+ 
 st.markdown('</div>', unsafe_allow_html=True)
-
+ 
 # --- Generate button ---
-if st.button("⚙️ Generar contrato"):
+if st.button("Generar contrato"):
     errors = []
-    if not uploaded_file:
-        errors.append("Sube la plantilla .docx antes de continuar.")
+    if not os.path.exists(TEMPLATE_PATH):
+        errors.append(f"No se encuentra la plantilla '{TEMPLATE_PATH}' en el servidor. Contacta al administrador.")
     if not employee_name.strip():
         errors.append("El nombre del empleado es obligatorio.")
     if not employee_id.strip():
@@ -502,14 +495,15 @@ if st.button("⚙️ Generar contrato"):
         errors.append("La fecha de inicio de servicios es obligatoria para transferencias internas.")
     if not is_internal and not external_start_date:
         errors.append("La fecha de inicio es obligatoria para contrataciones externas.")
-
+ 
     if errors:
         for e in errors:
-            st.markdown(f'<div class="error-box">❌ {e}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="error-box">{e}</div>', unsafe_allow_html=True)
     else:
         with st.spinner("Generando contrato..."):
             try:
-                template_bytes = uploaded_file.read()
+                with open(TEMPLATE_PATH, "rb") as f:
+                    template_bytes = f.read()
                 ctype = 'internal' if is_internal else 'external'
                 result_bytes = generate_contract(
                     template_bytes=template_bytes,
@@ -526,13 +520,14 @@ if st.button("⚙️ Generar contrato"):
                 type_label = 'interno' if is_internal else 'externo'
                 safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', employee_name.strip())
                 filename = f"contrato_{type_label}_{safe_name}.docx"
-
-                st.markdown('<div class="success-box">✅ Contrato generado correctamente. Haz clic para descargar.</div>', unsafe_allow_html=True)
+ 
+                st.markdown('<div class="success-box">Contrato generado correctamente. Haz clic para descargar.</div>', unsafe_allow_html=True)
                 st.download_button(
-                    label=f"⬇️ Descargar {filename}",
+                    label=f"Descargar {filename}",
                     data=result_bytes,
                     file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
             except Exception as e:
                 st.error(f"Error al generar el contrato: {e}")
+ 
